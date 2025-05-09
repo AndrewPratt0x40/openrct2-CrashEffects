@@ -123,24 +123,34 @@ namespace CrashEffects
 	}
 
 	/**
-	 * Convert a non-tile coordinate to a tile coordinate
+	 * Convert a 3D non-tile coordinate to a 3D tile coordinate
 	 * @param v Value of coordinate to convert
 	 * @return Tile coordinate
 	 */
 	function asTileCoord(v: CoordsXYZ): CoordsXYZ
 	{
 		return {
-			// The ratio of non-tile coords to tile coords is 32:1,
-			//	therefore each vector component should be divided by 32.
-			// For any real number n, n/32 = n*0.03125
-			x: v.x * 0.03125,
-			y: v.y * 0.03125,
-			z: v.z * 0.03125
+			x: v.x / 32,
+			y: v.y / 32,
+			z: v.z / 32
 		};
 	}
 	
 	/**
-	 * Convert a tile coordinate to a non-tile coordinate
+	 * Convert a 2D non-tile coordinate to a 2D tile coordinate
+	 * @param v Value of coordinate to convert
+	 * @return Tile coordinate
+	 */
+	function as2DTileCoord(v: CoordsXY): CoordsXY
+	{
+		return {
+			x: v.x / 32,
+			y: v.y / 32
+		};
+	}
+	
+	/**
+	 * Convert a 3D tile coordinate to a 3D non-tile coordinate
 	 * @param v Value of tile coordinate to convert
 	 * @return Non-tile coordinate
 	 */
@@ -150,6 +160,19 @@ namespace CrashEffects
 			x: v.x * 32,
 			y: v.y * 32,
 			z: v.z * 32
+		};
+	}
+	
+	/**
+	 * Convert a 3D tile coordinate to a 3D non-tile coordinate
+	 * @param v Value of tile coordinate to convert
+	 * @return Non-tile coordinate
+	 */
+	function as2DNonTileCoord(v: CoordsXY): CoordsXY
+	{
+		return {
+			x: v.x * 32,
+			y: v.y * 32
 		};
 	}
 
@@ -246,10 +269,6 @@ namespace CrashEffects
 				|| (
 					trackType >= TrackElemType.LogFlumeReverser
 					&& trackType <= TrackElemType.SpinningTunnel
-				)
-				|| (
-					trackType >= TrackElemType.Up25ToLeftBankedUp25
-					&& trackType <= TrackElemType.RightQuarterTurn1TileDown90
 				)
 				|| (
 					trackType >= TrackElemType.Up25ToLeftBankedUp25
@@ -508,7 +527,7 @@ namespace CrashEffects
 	 */
 	function convertSurfaceElementToRubble(elem: SurfaceElement, dmgStrength: number): void
 	{
-		// 	=Change surface style based on material and damage strength=
+		// =Change surface style based on material and damage strength=
 		// Minor damage
 		if (dmgStrength <= DMG_MINOR)
 		{
@@ -548,12 +567,13 @@ namespace CrashEffects
 	 * Damages a given surface tile element
 	 * @param elem Tile element to damage
 	 * @param elemIndex Index of the tile element to damage
+	 * @param rubbleCenter Central point of the rubble effect area
 	 * @param dmgStrength Strength of damage, where 0 is no damage and 1 is extreme damage
 	 */
-	function damageSurfaceTileElement(elem: SurfaceElement, elemIndex: number, dmgStrength: number): void
+	function damageSurfaceTileElement(elem: SurfaceElement, elemIndex: number, rubbleCenter: CoordsXYZ, dmgStrength: number): void
 	{
-		// Turn the surface to rubble
 		convertSurfaceElementToRubble(elem, dmgStrength);
+		// TODO: Deform ground based on dmgStrength and rubbleCenter
 	}
 
 
@@ -690,9 +710,10 @@ namespace CrashEffects
 	 * @param elem Tile element to damage
 	 * @param elemIndex Index of the tile element to damage
 	 * @param tile Tile containing the tile element to damage
+	 * @param rubbleCenter Central point of the rubble effect area
 	 * @param dmgStrength Strength of damage, where 0 is no damage and 1 is extreme damage
 	 */
-	function damageTileElement(elem: TileElement, elemIndex: number, tile: Tile, dmgStrength: number): void
+	function damageTileElement(elem: TileElement, elemIndex: number, tile: Tile, rubbleCenter: CoordsXYZ, dmgStrength: number): void
 	{
 		// Damage the element, based on it's type
 		// TODO: Large scenery items
@@ -700,7 +721,7 @@ namespace CrashEffects
 		{
 			// Terrain Surface
 			case "surface":
-				damageSurfaceTileElement(elem, elemIndex, dmgStrength);
+				damageSurfaceTileElement(elem, elemIndex, rubbleCenter, dmgStrength);
 				break;
 			
 			// Footpath
@@ -765,7 +786,7 @@ namespace CrashEffects
 			
 			// Damage the element, unless damage strength is zero
 			if (dmgStrength > 0)
-				damageTileElement(elem, elemIndex, tile, dmgStrength);
+				damageTileElement(elem, elemIndex, tile, rubbleCenter, dmgStrength);
 		}
 		
 		
@@ -841,6 +862,20 @@ namespace CrashEffects
 		// Kill staff members on the tile
 		killPeepsFromCrash(map.getAllEntitiesOnTile("staff", tilePos), crashPos, killRadius);
 	}
+	
+	
+	/**
+	 * Executes crash effects for a given tile
+	 * @param tilePos Position of the tile to create rubble at
+	 * @param crashPos Origin of the crash
+	 * @param affectRadius Maximum distance from crashPos to create rubble
+	 * @param killRadius Maximum distance from crashPos to kill peeps
+	 */
+	function crashEffectsForTile(tilePos: CoordsXYZ, crashPos: CoordsXYZ, affectRadius: number, killRadius: number): void
+	{
+		createRubbleAtTile(tilePos, crashPos, affectRadius);
+		killPeepsOnTileFromCrash(as2DNonTileCoord(tilePos), crashPos, killRadius);
+	}
 
 
 	/**
@@ -866,16 +901,9 @@ namespace CrashEffects
 				//	The position is the point theta radians along the side of a circle that's centered at pos with a radius of r
 				let tilePos = offsetBy2DPolar(pos, r, theta);
 				
-				// If the tile is inside the map...
+				// Create effects on tile
 				if (isTilePosInsideMap(tilePos))
-				{// Get tilePos as a CoordsXY object
-					// ...Create rubble at this tile
-					createRubbleAtTile(tilePos, pos, affectRadius);
-					// Kill peeps on this tile
-					killPeepsOnTileFromCrash({x: Math.trunc(tilePos.x * 32), y: Math.trunc(tilePos.y * 32)}, pos, killRadius);
-				}
-				
-				
+					crashEffectsForTile(tilePos, pos, affectRadius, killRadius);
 			}
 		}
 	}
@@ -934,6 +962,8 @@ namespace CrashEffects
 		licence:	"https://github.com/andrewpratt64/openrct2-CrashEffects/blob/main/LICENSE.txt",
 		authors:	["Andrew Pratt"],
 		type:		"remote",
+		targetApiVersion: 107,
+		minApiVersion: 107,
 		main:		() => { init() }
 	};
 }
